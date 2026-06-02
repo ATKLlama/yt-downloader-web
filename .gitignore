@@ -1,7 +1,5 @@
+cookies.txt
 __pycache__/
-Downloads/
 .env
 *.pyc
-
-# YouTube cookies (IMPORTANT)
-backend/cookies.txt
+Downloads/
