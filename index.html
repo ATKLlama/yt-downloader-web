@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>YouTube Downloader</h1>
+    <form id="downloadForm">
+        <input type="text" id="url" placeholder="YouTube URL" required>
+        <select id="format">
+            <option value="mp4">MP4</option>
+            <option value="mp3">MP3</option>
+        </select>
+        <button type="submit">Download</button>
+    </form>
+
+    <p id="status"></p>
+
+    <script>
+        const form = document.getElementById('downloadForm');
+        const status = document.getElementById('status');
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            status.textContent = "Processing...";
+
+            const url = document.getElementById('url').value;
+            const format = document.getElementById('format').value;
+
+            try {
+                const response = await fetch('https://yt-downloader-web-sea7.onrender.com', {
+                    method: 'POST',
+                    body: new URLSearchParams({url, format}),
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    status.textContent = "Error: " + (message || response.statusText);
+                    return;
+                }
+
+                const blob = await response.blob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `download.${format}`;
+                link.click();
+                status.textContent = "Download complete!";
+            } catch (err) {
+                status.textContent = "Error: " + err;
+            }
+        });
+    </script>
+</body>
+</html>
