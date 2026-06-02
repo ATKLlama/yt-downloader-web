@@ -1,3 +1,5 @@
+from flask import Flask, request, send_file, jsonify, after_this_request
+from flask_cors import CORS
 import os
 import re
 import shutil
@@ -5,8 +7,6 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, request, send_file, jsonify, after_this_request
-from flask_cors import CORS
 import yt_dlp
 import imageio_ffmpeg
 
@@ -18,59 +18,56 @@ ALLOWED_HOSTS = {
     "youtu.be",
     "m.youtube.com",
     "music.youtube.com",
-    "youtube-nocookie.com",
 }
 
-
-def is_valid_youtube_url(value: str) -> bool:
-    if not isinstance(value, str):
-        return False
-
+def is_valid_youtube_url(url):
     try:
-        parsed = urlparse(value.strip())
+        parsed = urlparse(url.strip())
+
+        if parsed.scheme not in ["http", "https"]:
+            return False
+
+        host = (parsed.hostname or "").lower()
+
+        if host.startswith("www."):
+            host = host[4:]
+
+        return (
+            host in ALLOWED_HOSTS
+            or any(host.endswith("." + h) for h in ALLOWED_HOSTS)
+        )
+
     except Exception:
         return False
 
-    if parsed.scheme not in {"http", "https"}:
-        return False
+def sanitize_filename(name):
+    name = re.sub(r'[<>:"/\\|?*]', "*", name)
+    name = re.sub(r"\s+", "*", name)
+    return name[:180]
 
-    hostname = (parsed.hostname or "").lower()
-    if hostname.startswith("www."):
-        hostname = hostname[4:]
-
-    return hostname in ALLOWED_HOSTS or any(hostname.endswith(f".{host}") for host in ALLOWED_HOSTS)
-
-
-def sanitize_filename(value: str) -> str:
-    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value)
-    sanitized = re.sub(r"\s+", "_", sanitized).strip("_.")
-    return sanitized[:200] or "download"
-
-
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
     return jsonify({
         "status": "online",
         "message": "YT Downloader Backend Running"
     })
 
-
 @app.route("/download", methods=["POST"])
 def download():
     url = request.form.get("url", "").strip()
-    format_type = request.form.get("format", "").strip().lower()
+    format_type = request.form.get("format", "").lower().strip()
 
     if not url:
         return jsonify({"error": "Missing URL"}), 400
 
-    if format_type not in {"mp3", "mp4"}:
+    if format_type not in ["mp3", "mp4"]:
         return jsonify({"error": "Invalid format"}), 400
 
     if not is_valid_youtube_url(url):
-        return jsonify({"error": "Only YouTube URLs are allowed."}), 400
+        return jsonify({"error": "Only YouTube URLs are supported"}), 400
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-    temp_dir = tempfile.mkdtemp(prefix="ytdlp_")
+    temp_dir = tempfile.mkdtemp(prefix="ytdl_")
 
     @after_this_request
     def cleanup(response):
@@ -84,17 +81,30 @@ def download():
         "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
         "ffmpeg_location": ffmpeg_path,
         "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
+        "quiet": False,
+        "no_warnings": False,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 3,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/125.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9"
+        }
     }
 
     if os.path.exists("cookies.txt"):
+        print("Using cookies.txt")
         ydl_opts["cookiefile"] = "cookies.txt"
 
     if format_type == "mp4":
         ydl_opts.update({
             "format": "bestvideo+bestaudio/best",
-            "merge_output_format": "mp4",
+            "merge_output_format": "mp4"
         })
     else:
         ydl_opts.update({
@@ -102,43 +112,44 @@ def download():
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "320",
-            }],
+                "preferredquality": "320"
+            }]
         })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            downloaded = Path(ydl.prepare_filename(info))
+            filename = Path(ydl.prepare_filename(info))
 
             if format_type == "mp3":
-                downloaded = downloaded.with_suffix(".mp3")
+                filename = filename.with_suffix(".mp3")
 
-            if not downloaded.exists():
-                return jsonify({"error": "Downloaded file could not be found."}), 500
+            if not filename.exists():
+                return jsonify({"error": "Download completed but file not found"}), 500
 
             title = sanitize_filename(info.get("title", info.get("id", "download")))
-            download_name = f"{title}{downloaded.suffix}"
+            download_name = f"{title}{filename.suffix}"
 
-            try:
-                return send_file(
-                    str(downloaded),
-                    as_attachment=True,
-                    download_name=download_name,
-                )
-            except TypeError:
-                return send_file(
-                    str(downloaded),
-                    as_attachment=True,
-                    attachment_filename=download_name,
-                )
+            return send_file(
+                str(filename),
+                as_attachment=True,
+                download_name=download_name
+            )
 
-    except yt_dlp.utils.DownloadError:
-        return jsonify({"error": "Unable to download the requested media."}), 502
-    except Exception:
-        return jsonify({"error": "Server error occurred."}), 500
+    except yt_dlp.utils.DownloadError as e:
+        print("YT-DLP ERROR:")
+        print(repr(e))
+        return jsonify({"error": str(e)}), 502
 
+    except Exception as e:
+        print("SERVER ERROR:")
+        print(repr(e))
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
