@@ -7,13 +7,12 @@ import imageio_ffmpeg
 app = Flask(__name__)
 CORS(app)
 
-DOWNLOAD_FOLDER = "Downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+DOWNLOAD_FOLDER = "/tmp"  # IMPORTANT for Render (not local folder)
 
 
 @app.route("/", methods=["GET"])
 def home():
-    return "YT Downloader backend is running"
+    return "Backend running"
 
 
 @app.route("/download", methods=["POST"])
@@ -27,13 +26,13 @@ def download():
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
     ydl_opts = {
-        "outtmpl": os.path.join(DOWNLOAD_FOLDER, "%(title)s.%(ext)s"),
+        "outtmpl": f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
         "ffmpeg_location": ffmpeg_path,
         "noplaylist": True,
     }
 
     if format_type == "mp4":
-        ydl_opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
+        ydl_opts["format"] = "bestvideo+bestaudio/best"
         ydl_opts["merge_output_format"] = "mp4"
     else:
         ydl_opts["format"] = "bestaudio/best"
@@ -43,15 +42,21 @@ def download():
             "preferredquality": "320",
         }]
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
 
-        if format_type == "mp3":
-            filename = os.path.splitext(filename)[0] + ".mp3"
+            filename = ydl.prepare_filename(info)
 
-    return send_file(filename, as_attachment=True)
+            if format_type == "mp3":
+                filename = filename.rsplit(".", 1)[0] + ".mp3"
+
+        return send_file(filename, as_attachment=True)
+
+    except Exception as e:
+        print("ERROR:", e)
+        return abort(500, str(e))
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run()
