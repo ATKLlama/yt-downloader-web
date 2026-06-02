@@ -59,21 +59,13 @@ def download():
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     temp_dir = tempfile.mkdtemp(prefix="ytdl_")
 
-    # Prepare temporary cookie file from environment variable
-    cookies_env = os.environ.get("YOUTUBE_COOKIES")
-    temp_cookies_path = None
-    if cookies_env:
-        temp_cookies = tempfile.NamedTemporaryFile(delete=False)
-        temp_cookies.write(cookies_env.encode())
-        temp_cookies.flush()
-        temp_cookies_path = temp_cookies.name
+    # Path to cookies.txt (Secret File on Render)
+    cookies_path = "/opt/render/project/src/cookies.txt"  # <-- Render Secret File path
 
     @after_this_request
     def cleanup(response):
         try:
             shutil.rmtree(temp_dir)
-            if temp_cookies_path:
-                os.remove(temp_cookies_path)
         except Exception:
             pass
         return response
@@ -98,9 +90,10 @@ def download():
         }
     }
 
-    # Use temporary cookies file if present
-    if temp_cookies_path:
-        ydl_opts["cookiefile"] = temp_cookies_path
+    # Use cookies.txt if it exists
+    if os.path.exists(cookies_path):
+        ydl_opts["cookiefile"] = cookies_path
+        print(f"Using cookies file at {cookies_path}")
 
     if format_type == "mp4":
         ydl_opts.update({
