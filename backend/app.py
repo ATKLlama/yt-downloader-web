@@ -23,20 +23,12 @@ ALLOWED_HOSTS = {
 def is_valid_youtube_url(url):
     try:
         parsed = urlparse(url.strip())
-
         if parsed.scheme not in ["http", "https"]:
             return False
-
         host = (parsed.hostname or "").lower()
-
         if host.startswith("www."):
             host = host[4:]
-
-        return (
-            host in ALLOWED_HOSTS
-            or any(host.endswith("." + h) for h in ALLOWED_HOSTS)
-        )
-
+        return host in ALLOWED_HOSTS or any(host.endswith("." + h) for h in ALLOWED_HOSTS)
     except Exception:
         return False
 
@@ -59,20 +51,29 @@ def download():
 
     if not url:
         return jsonify({"error": "Missing URL"}), 400
-
     if format_type not in ["mp3", "mp4"]:
         return jsonify({"error": "Invalid format"}), 400
-
     if not is_valid_youtube_url(url):
         return jsonify({"error": "Only YouTube URLs are supported"}), 400
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     temp_dir = tempfile.mkdtemp(prefix="ytdl_")
 
+    # Prepare temporary cookie file from environment variable
+    cookies_env = os.environ.get("YOUTUBE_COOKIES")
+    temp_cookies_path = None
+    if cookies_env:
+        temp_cookies = tempfile.NamedTemporaryFile(delete=False)
+        temp_cookies.write(cookies_env.encode())
+        temp_cookies.flush()
+        temp_cookies_path = temp_cookies.name
+
     @after_this_request
     def cleanup(response):
         try:
             shutil.rmtree(temp_dir)
+            if temp_cookies_path:
+                os.remove(temp_cookies_path)
         except Exception:
             pass
         return response
@@ -97,9 +98,9 @@ def download():
         }
     }
 
-    if os.path.exists("cookies.txt"):
-        print("Using cookies.txt")
-        ydl_opts["cookiefile"] = "cookies.txt"
+    # Use temporary cookies file if present
+    if temp_cookies_path:
+        ydl_opts["cookiefile"] = temp_cookies_path
 
     if format_type == "mp4":
         ydl_opts.update({
@@ -120,10 +121,8 @@ def download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = Path(ydl.prepare_filename(info))
-
             if format_type == "mp3":
                 filename = filename.with_suffix(".mp3")
-
             if not filename.exists():
                 return jsonify({"error": "Download completed but file not found"}), 500
 
@@ -137,13 +136,10 @@ def download():
             )
 
     except yt_dlp.utils.DownloadError as e:
-        print("YT-DLP ERROR:")
-        print(repr(e))
+        print("YT-DLP ERROR:", repr(e))
         return jsonify({"error": str(e)}), 502
-
     except Exception as e:
-        print("SERVER ERROR:")
-        print(repr(e))
+        print("SERVER ERROR:", repr(e))
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
