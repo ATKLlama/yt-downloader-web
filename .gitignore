@@ -2,3 +2,6 @@ __pycache__/
 Downloads/
 .env
 *.pyc
+
+# YouTube cookies (IMPORTANT)
+backend/cookies.txt
