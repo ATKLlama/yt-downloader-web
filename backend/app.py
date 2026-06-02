@@ -7,7 +7,7 @@ import imageio_ffmpeg
 app = Flask(__name__)
 CORS(app)
 
-DOWNLOAD_FOLDER = "/tmp"  # IMPORTANT for Render (not local folder)
+DOWNLOAD_FOLDER = "/tmp"
 
 
 @app.route("/", methods=["GET"])
@@ -59,4 +59,4 @@ def download():
 
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host="0.0.0.0", port=5000)
